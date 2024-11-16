@@ -1,54 +1,75 @@
-# Load necessary libraries
 library(shiny)
+library(deSolve)
 
 # Define UI
 ui <- fluidPage(
   titlePanel("Maximum Sustainable Yield (MSY) Model with Two Fish Species"),
-  sidebarLayout(
-    sidebarPanel(
-      sliderInput("harvestRate", "Harvest Rate:", min = 0, max = 1, value = 0.5, step = 0.01),
-      sliderInput("SARpenalty", "Species at risk penalty:", min = 0, max = 1000, value = 0, step = 10)
+  fluidRow(
+    column(4,
+           sliderInput("harvestRate", "Harvest Rate:", min = 0, max = 1, value = 0, step = 0.1),
+           # numericInput("harvestRateInput", "Harvest Rate Input:", value = 0, min = 0, max = 1, step = 0.1),
+           sliderInput("SARpenalty", "Species at risk penalty:", min = 0, max = 1000, value = 0, step = 100),
+           # numericInput("SARpenaltyInput", "Species at risk penalty Input:", value = 0, min = 0, max = 1000, step = 100),
+           sliderInput("selectiveNets", "Selective nets:", min = 0, max = 100, value = 0, step = 10),
+           # numericInput("selectiveNetsInput", "Selective nets Input:", value = 0, min = 0, max = 100, step = 10)
     ),
-    mainPanel(
-      plotOutput("populationPlot"),
-      plotOutput("profitPlot")
+    column(8,
+           plotOutput("populationPlot", height = "300px"),
+           plotOutput("profitPlot", height = "300px")
     )
   )
 )
 
 # Define server logic
-server <- function(input, output) {
+server <- function(input, output, session) {
+  observe({
+    updateSliderInput(session, "harvestRate", value = input$harvestRateInput)
+    updateSliderInput(session, "SARpenalty", value = input$SARpenaltyInput)
+    updateSliderInput(session, "selectiveNets", value = input$selectiveNetsInput)
+  })
+
+  # observe({
+  #   updateNumericInput(session, "harvestRateInput", value = input$harvestRate)
+  #   updateNumericInput(session, "SARpenaltyInput", value = input$SARpenalty)
+  #   updateNumericInput(session, "selectiveNetsInput", value = input$selectiveNets)
+  # })
+
   output$populationPlot <- renderPlot({
     # Parameters
     r1 <- 0.5  # Intrinsic growth rate for Commercial Fish
     K1 <- 1000 # Carrying capacity for Commercial Fish
-    r2 <- 0.2  # Intrinsic growth rate for Species at Risk Fish
+    r2 <- 0.05  # Intrinsic growth rate for Species at Risk Fish
     K2 <- 200  # Carrying capacity for Species at Risk Fish
     H <- input$harvestRate # Harvest rate
     P <- input$SARpenalty # SAR penalty
+    C <- input$selectiveNets # Selective nets
 
-    # Time steps
-    time <- seq(0, 50, by = 1)
-
-    # Initialize populations
-    N1 <- numeric(length(time))
-    N2 <- numeric(length(time))
-    N1[1] <- 500 # Initial population for Commercial Fish
-    N2[1] <- 20  # Initial population for Species at Risk Fish
-
-    # Simulate population dynamics
-    for (t in 2:length(time)) {
-      N1[t] <- N1[t-1] + r1 * N1[t-1] * (1 - N1[t-1] / K1) - H * N1[t-1]
-      N2[t] <- N2[t-1] + r2 * N2[t-1] * (1 - N2[t-1] / K2) - H * N2[t-1]
-      if (N1[t] < 0) N1[t] <- 0 # Population cannot be negative
-      if (N2[t] < 0) N2[t] <- 0 # Population cannot be negative
+    # Model function
+    fish_model <- function(time, state, parameters) {
+      with(as.list(c(state, parameters)), {
+        dN1 <- r1 * N1 * (1 - N1 / K1) - H * N1
+        dN2 <- r2 * N2 * (1 - N2 / K2) - H * N2 * (1 - C / 100)
+        list(c(dN1, dN2))
+      })
     }
 
+    # Initial state
+    state <- c(N1 = 500, N2 = 20)
+
+    # Parameters
+    parameters <- c(r1 = r1, K1 = K1, r2 = r2, K2 = K2, H = H, C = C)
+
+    # Time steps
+    times <- seq(0, 50, by = 1)
+
+    # Solve the model
+    out <- ode(y = state, times = times, func = fish_model, parms = parameters)
+
     # Plot results
-    plot(time, N1, type = "l", col = "blue", lwd = 2,
+    plot(out[, "time"], out[, "N1"], type = "l", col = "blue", lwd = 2,
          xlab = "Time", ylab = "Population Size",
          main = "Population Dynamics under Different Harvest Rates", ylim = c(0, 1000))
-    lines(time, N2, col = "red", lwd = 2)
+    lines(out[, "time"], out[, "N2"], col = "red", lwd = 2)
     abline(h = 0, lwd = 2, lty = 2)
     legend("topright", legend = c("Commercial Fish", "Species at Risk Fish"),
            col = c("blue", "red"), lwd = 2)
@@ -58,34 +79,40 @@ server <- function(input, output) {
     # Parameters
     r1 <- 0.5  # Intrinsic growth rate for Commercial Fish
     K1 <- 1000 # Carrying capacity for Commercial Fish
-    r2 <- 0.2  # Intrinsic growth rate for Species at Risk Fish
+    r2 <- 0.05  # Intrinsic growth rate for Species at Risk Fish
     K2 <- 200  # Carrying capacity for Species at Risk Fish
     H <- input$harvestRate # Harvest rate
     P <- input$SARpenalty # SAR penalty
+    C <- input$selectiveNets # Selective nets
 
-    # Time steps
-    time <- seq(0, 50, by = 1)
-
-    # Initialize populations and profit
-    N1 <- numeric(length(time))
-    N2 <- numeric(length(time))
-    profit <- numeric(length(time))
-    N1[1] <- 500 # Initial population for Commercial Fish
-    N2[1] <- 20  # Initial population for Species at Risk Fish
-
-    # Simulate population dynamics and calculate profit
-    for (t in 2:length(time)) {
-      N1[t] <- N1[t-1] + r1 * N1[t-1] * (1 - N1[t-1] / K1) - H * N1[t-1]
-      N2[t] <- N2[t-1] + r2 * N2[t-1] * (1 - N2[t-1] / K2) - H * N2[t-1]
-      if (N1[t] < 0) N1[t] <- 0 # Population cannot be negative
-      if (N2[t] < 0) N2[t] <- 0 # Population cannot be negative
-      profit[t] <- H * (10 * N1[t] - P * N2[t])
+    # Model function
+    fish_model <- function(time, state, parameters) {
+      with(as.list(c(state, parameters)), {
+        dN1 <- r1 * N1 * (1 - N1 / K1) - H * N1
+        dN2 <- r2 * N2 * (1 - N2 / K2) - H * N2 * (1 - C / 100)
+        list(c(dN1, dN2))
+      })
     }
 
+    # Initial state
+    state <- c(N1 = 500, N2 = 20)
+
+    # Parameters
+    parameters <- c(r1 = r1, K1 = K1, r2 = r2, K2 = K2, H = H, C = C)
+
+    # Time steps
+    times <- seq(0, 50, by = 1)
+
+    # Solve the model
+    out <- ode(y = state, times = times, func = fish_model, parms = parameters)
+
+    # Calculate profit
+    profit <- H * 10 * out[, "N1"] - H * (1 - C / 100) * P * out[, "N2"] - C * 0.0001 * H * out[, "N1"]
+
     # Plot results
-    plot(time, profit, type = "l", col = "green", lwd = 2,
+    plot(out[, "time"], profit, type = "l", col = "green", lwd = 2,
          xlab = "Time", ylab = "Net Profit",
-         main = "Annual Net Profit from Fishing ($)", ylim = c(0,2000))
+         main = "Annual Net Profit from Fishing ($)", ylim = c(min(profit), max(profit)))
 
     calculate_npv <- function(net_profits, discount_rate = 0.03) {
       npv <- sum(net_profits / (1 + discount_rate)^(0:(length(net_profits) - 1)))
@@ -94,9 +121,7 @@ server <- function(input, output) {
 
     npv = round(calculate_npv(net_profits = profit), 0)
 
-    legend("topright", legend = paste0("Net present value= $",npv), bty = "n")
-
-
+    legend("topright", legend = paste0("Net present value= $", npv), bty = "n")
   })
 }
 
